@@ -24,26 +24,29 @@ function getAddress(keypair){
 secret = 'LgsQ5Y89f3IVkyGJ6UeRnEPT4Aum7Hvz';
 commitment = 'bf19f1b16bea379e6c3978920afabb506a6694179464355191d9a7f76ab79483';
 
+print4debug = console.log;
+print4debug = function() {}
+
 async function findOneTxToAddress(dest){
 	txs = await client.listUnspent(0,  1000000, [dest]);
-	console.log('find dest: ' + dest);
+	// print4debug('find dest: ' + dest);
 	for(i = 0; i < txs.length; i++){
 		tx = txs[i];		
 		if(dest === tx['address']){
-			console.log(JSON.stringify(tx, null, 4));
+			print4debug(JSON.stringify(tx, null, 4));
 			return tx
 		}
 	}
 	return null
 }
 
-print = console.log;
+
 async function hashtimelockcontract(commitment, locktime){
 	blocknum = await client.getBlockCount();
-	console.log("blocknum:" + blocknum);
-    print("Current blocknum on Bitcoin: " + blocknum);
+	print4debug("blocknum:" + blocknum);
+    print4debug("Current blocknum on Bitcoin: " + blocknum);
     redeemblocknum = blocknum + locktime;
-    print("Redeemblocknum on Bitcoin: " + redeemblocknum);
+    print4debug("Redeemblocknum on Bitcoin: " + redeemblocknum);
 
     redeemScript = bitcoin.script.compile([
         /* MAIN IF BRANCH */
@@ -70,7 +73,7 @@ async function hashtimelockcontract(commitment, locktime){
         bitcoin.opcodes.OP_EQUALVERIFY,
         bitcoin.opcodes.OP_CHECKSIG
     ]);   
-    console.log(redeemScript.toString('hex')); 
+    print4debug(redeemScript.toString('hex')); 
     //var scriptPubKey = bitcoin.script.scriptHash.output.encode(bitcoin.crypto.hash160(redeemScript));
     //var address = bitcoin.address.fromOutputScript(scriptPubKey, network)
 
@@ -97,16 +100,13 @@ async function fundHtlc(p2sh, amount){
 
 // implicit redeem by bob
 async function redeem(contract, fundtx, secret){
-    // TODO: remove next line
-    // await client.generate(1); 
-
-
 	redeemScript = contract['redeemScript'];
 
 	var txb = new bitcoin.TransactionBuilder(network);
-	console.log('----W----A----N----C----H----A----I----N----');
-	console.log(JSON.stringify(fundtx))
-	console.log('----W----A----N----C----H----A----I----N----');
+	txb.setVersion(1);
+	print4debug('----W----A----N----C----H----A----I----N----');
+	print4debug(JSON.stringify(fundtx))
+	print4debug('----W----A----N----C----H----A----I----N----');
 	txb.addInput(fundtx.txid, fundtx.vout);
 	txb.addOutput(getAddress(bob), (fundtx.amount-FEE)*100000000);
 
@@ -126,9 +126,75 @@ async function redeem(contract, fundtx, secret){
 		network: bitcoin.networks.regtest
 	}).input
 	tx.setInputScript(0, redeemScriptSig);
-	console.log("redeem raw tx: \n" + tx.toHex());
-	await client.sendRawTransaction(tx.toHex(), function(err){console.log(err);});
+	print4debug("redeem raw tx: \n" + tx.toHex());
+	txid = await client.sendRawTransaction(tx.toHex(), 
+		function(err){print4debug(err);}
+	);
+	print4debug("redeem tx id:" + txid);
 }
+
+
+async function refund(contract, fundtx){
+	person = alice;// can change person to bob will failed
+	redeemScript = contract['redeemScript'];
+
+	var txb = new bitcoin.TransactionBuilder(network);
+	txb.setLockTime(contract['redeemblocknum']);
+	txb.setVersion(1);
+	txb.addInput(fundtx.txid, fundtx.vout, 0);
+	txb.addOutput(getAddress(person), (fundtx.amount-FEE)*100000000);
+
+	const tx = txb.buildIncomplete();
+	const sigHash = tx.hashForSignature(0, redeemScript, bitcoin.Transaction.SIGHASH_ALL);
+
+	const redeemScriptSig = bitcoin.payments.p2sh({
+		redeem: {
+			input: bitcoin.script.compile([
+				bitcoin.script.signature.encode(person.sign(sigHash), bitcoin.Transaction.SIGHASH_ALL),
+				person.publicKey,
+				bitcoin.opcodes.OP_FALSE
+				]),
+			output: redeemScript
+		}
+	}).input;
+
+	tx.setInputScript(0, redeemScriptSig);
+	print4debug("refund raw tx: \n" + tx.toHex());
+
+	await client.sendRawTransaction(tx.toHex(), 
+		function(err){print4debug(err);}
+	);
+}
+
+async function testRefund(){
+	contract = await hashtimelockcontract(commitment, 10);
+
+	await fundHtlc(contract['p2sh'], 16);
+	fundtx = await findOneTxToAddress(contract['p2sh']);
+	print4debug("fundtx:" + JSON.stringify(fundtx, null, 4));
+
+    await client.generate(66);
+	await refund(contract, fundtx);
+}
+
+async function testRedeem(){
+
+	contract = await hashtimelockcontract(commitment, 10);
+
+	await fundHtlc(contract['p2sh'], 16);
+	fundtx = await findOneTxToAddress(contract['p2sh']);
+	print4debug("fundtx:" + JSON.stringify(fundtx, null, 4));
+
+	await redeem(contract, fundtx, secret);
+}
+
+async function showBalance(info){
+    aliceBalance = await client.getReceivedByAddress(getAddress(alice), 0);
+    bobBalance = await client.getReceivedByAddress(getAddress(bob), 0);
+    console.log(info + " alice Balance: " + aliceBalance);
+    console.log(info + " bob   Balance: " + bobBalance);
+}
+
 
 async function main(){
 	await client.generate(1);
@@ -136,40 +202,12 @@ async function main(){
 	await client.importAddress(getAddress(alice), "");
 	await client.importAddress(getAddress(bob), "");
 
-	aliceBalance = await client.getReceivedByAddress(getAddress(alice), 0);
-	//console.log("alice balance:" + aliceBalance);
+	showBalance('Begin');
 
-	//utxo = await findOneTxToAddress(bob.getAddress());
-	//console.log(JSON.stringify(utxo, null, 4));
+	await testRedeem();
 
-	contract = await hashtimelockcontract(commitment, 10);
-
-	await fundHtlc(contract['p2sh'], 16);
-	fundtx = await findOneTxToAddress(contract['p2sh']);
-	console.log("fundtx:" + JSON.stringify(fundtx, null, 4));
-
-
-    oldBobBalance = await client.getReceivedByAddress(getAddress(bob), 0);
-
-
-	await redeem(contract, fundtx, secret);
-
-
-	newBobBalance = await client.getReceivedByAddress(getAddress(bob), 0);
-    console.log("oldBalance: " + oldBobBalance);
-    console.log("newBalance: " + newBobBalance);
-
-    
-    //console.log('contract:   ' + JSON.stringify(contract, null, 4));
-
-    // await client.generate(1);
-    // oldAliceBalance = await client.getReceivedByAddress(alice.getAddress(), 0);
-    // whatisthis = await client.sendToAddress(alice.getAddress(), 22);
-    // await client.generate(1);
-    // newAliceBalance = await client.getReceivedByAddress(alice.getAddress(), 0);
-    // console.log("oldBalance: " + oldAliceBalance);
-    // console.log("newBalance: " + newAliceBalance);
-    // console.log("emmmm: " + whatisthis);
+	showBalance('End');
 }
+
 
 main();
