@@ -61,21 +61,23 @@ proxy.sendtoaddress(alice['addr'], 100*COIN)
 def find_transaction_to_address(proxy, p2sh):
     txs = proxy.listunspent()
     for tx in txs:
-        if tx['address'] == CBitcoinAddress(p2sh):
+        if str(tx['address']) == str(p2sh):
             print("Found tx to p2sh: {0}".format(p2sh))
             return tx
 
 def find_txs_to_address(proxy, p2sh):
     txs = proxy.listunspent()
     for tx in txs:
-        if tx['address'] == p2sh:
+        if str(tx['address']) == str(p2sh):
             print(tx)
 
 proxy = bitcoin.rpc.Proxy(timeout=1000)
 # alice_receive_mony_tx = find_transaction_to_address(proxy, alice['addr'])
 
-secret = 'LgsQ5Y89f3IVkyGJ6UeRnEPT4Aum7Hvz'
-commitment = 'bf19f1b16bea379e6c3978920afabb506a6694179464355191d9a7f76ab79483'
+# secret = 'LgsQ5Y89f3IVkyGJ6UeRnEPT4Aum7Hvz'
+# commitment = 'bf19f1b16bea379e6c3978920afabb506a6694179464355191d9a7f76ab79483'
+secret = generate_secret()
+commitment = secret2Commitment(secret)
 
 def hashtimelockcontract(proxy, funder, redeemer, commitment, locktime):
     funderAddr = CBitcoinAddress('ms6KpXRvUwwygwzgRoANRwgcGskXcnEwAr')
@@ -130,12 +132,7 @@ def getProxy():
 proxy = bitcoin.rpc.Proxy(timeout=1000)
 
 
-
-
-
-
-
-def redeem(proxy, redeemerGuy, contract, fundtx, secret, txid):
+def redeem(proxy, redeemerGuy, contract, fundtx, secret):
     print('redeemPubKey', redeemerGuy['addr'])
     # TODO: Compare with script on blockchain?
     redeemScript = CScript(x(contract['redeemScript']))
@@ -166,14 +163,35 @@ def redeem(proxy, redeemerGuy, contract, fundtx, secret, txid):
     return {"redeem_tx": redeem_tx, "fund_tx": fund_tx}
 
 
+def refund(proxy, refundGuy, contract):
+    redeemScript = CScript(x(contract['redeemScript']))
+    txin = CMutableTxIn(fundtx['outpoint'])
+    txout = CMutableTxOut(fundtx['amount'] - FEE,
+                          refundGuy['addr'].to_scriptPubKey())
+
+    tx = CMutableTransaction([txin], [txout])
+    txin.nSequence = 0
+    tx.nLockTime = contract['redeemblocknum']
+    sighash = SignatureHash(redeemScript, tx, 0, SIGHASH_ALL)
+
+    sig = refundGuy['key'].sign(sighash) + bytes([SIGHASH_ALL])
+
+    txin.scriptSig = CScript([sig, refundGuy['key'].pub, OP_FALSE, redeemScript])
+
+    txin_scriptPubKey = redeemScript.to_p2sh_scriptPubKey()
+    print('Raw redeem transaction hex: {0}'.format(b2x(tx.serialize())))
+    res = VerifyScript(txin.scriptSig, txin_scriptPubKey,
+                       tx, 0, (SCRIPT_VERIFY_P2SH,))
+    print("Script verified, sending raw transaction... (NOT)", res)
+
+    txid = proxy.sendrawtransaction(tx)
+    refund_tx = b2x(lx(b2x(txid)))
+    fund_tx = str(fundtx['outpoint'])
+    return {"refund_tx": refund_tx, "fund_tx": fund_tx}
 
 
-
-
-
-redeemResult = redeem(proxy, bob, contract, fundtx, secret, fundtxid)
-
-proxy.getreceivedbyaddress(bob['addr'], 0)
-
+# redeemResult = redeem(proxy, bob, contract, fundtx, secret)
+# proxy.getreceivedbyaddress(bob['addr'], 0)
+# refund(prxoy, alice, contract)
 
 
