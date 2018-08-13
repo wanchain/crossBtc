@@ -5,6 +5,8 @@ const bitcoin  = require('bitcoinjs-lib');
 const config = require('./config.js');
 const Client = require('bitcoin-core');
 const pu = require('promisefy-util');
+let WanchainCore = require('wanchain-crosschain');
+let ccUtil;
 const client = new Client(config.server.regtest);
 //const bip32 = require('bip32');
 const bnet = bitcoin.networks.testnet;
@@ -78,4 +80,14 @@ async function testListUtxo() {
 
 
 }
-testListUtxo();
+
+async function init(){
+    wanchainCore = new WanchainCore(config);
+    ccUtil = wanchainCore.be;
+    await wanchainCore.init(config);
+}
+
+async function main(){
+    await init();
+    testListUtxo();
+}
