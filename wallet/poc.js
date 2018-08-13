@@ -1,3 +1,4 @@
+// this code is equal to https://github.com/wanchain/crossBtc/blob/master/docs/python-poc/simple_btc_htlc.py
 const bitcoin  = require('bitcoinjs-lib');
 var bip65 = require('bip65');
 
@@ -202,11 +203,11 @@ async function main(){
 	await client.importAddress(getAddress(alice), "");
 	await client.importAddress(getAddress(bob), "");
 
-	showBalance('Begin');
+	await showBalance('Begin');
 
 	await testRedeem();
 
-	showBalance('End');
+	await showBalance('End');
 }
 
 
